@@ -1,0 +1,157 @@
+import numpy as np
+import librosa
+import matplotlib.pyplot as plt
+from scipy.signal import butter, sosfiltfilt
+import IPython.display as ipd
+import time
+
+def load_audio(file_path):
+    audio, sr = librosa.load(file_path, sr=None)
+    return audio, sr
+
+def play_audio(audio, sr):
+    ipd.display(ipd.Audio(audio, rate=sr))
+
+def plot_time_domain(audio, sr, title="Time Domain"):
+    time = np.arange(0, len(audio)) / sr
+    plt.figure(figsize=(12, 4))
+    plt.plot(time, audio)
+    plt.title(title)
+    plt.xlabel('Time (s)')
+    plt.ylabel('Amplitude')
+    plt.show()
+
+def plot_frequency_domain(audio, sr, title="Frequency Domain"):
+    stft_matrix = librosa.stft(audio)
+    plt.figure(figsize=(12, 4))
+    librosa.display.specshow(librosa.amplitude_to_db(np.abs(stft_matrix), ref=np.max), sr=sr, x_axis='time', y_axis='hz')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(title)
+    plt.show()
+
+def apply_iir_filter(audio_data, sr, cutoff_freq=1000, order=4):
+    sos = butter(N=order, Wn=cutoff_freq/(0.5*sr), btype='low', analog=False, output='sos')
+    filtered_audio = sosfiltfilt(sos, audio_data)
+    return filtered_audio
+
+def calculate_attenuation(original_audio, filtered_audio):
+    attenuation = np.mean(librosa.amplitude_to_db(np.abs(original_audio)) - librosa.amplitude_to_db(np.abs(filtered_audio)))
+    return attenuation
+
+def calculate_noise_reduction(original_attenuation, filtered_attenuation):
+    noise_reduction_percentage = (1 - 10 ** ((original_attenuation - filtered_attenuation) / 10)) * 100
+    return noise_reduction_percentage
+
+def main():
+    start_time = time.time()
+
+    input_file_path = input("Enter the path to the input audio file: ")
+    audio_data, sampling_rate = load_audio(input_file_path)
+
+    print("Original Audio:")
+    play_audio(audio_data, sampling_rate)
+    plot_time_domain(audio_data, sampling_rate, title="Original Time Domain")
+    plot_frequency_domain(audio_data, sampling_rate, title="Original Frequency Domain")
+
+    original_attenuation = calculate_attenuation(audio_data, audio_data)
+    original_noise_reduction = calculate_noise_reduction(original_attenuation, original_attenuation)
+
+    # Measure STFT execution time
+    stft_start_time = time.time()
+    stft_cutoff_freq = float(input("Enter the cutoff frequency for STFT (in Hz): "))
+    stft_matrix = librosa.stft(audio_data)
+    stft_matrix_filtered = stft_matrix * (librosa.fft_frequencies(sr=sampling_rate) <= stft_cutoff_freq)[:, np.newaxis]
+    audio_stft = librosa.istft(stft_matrix_filtered)
+    stft_end_time = time.time()
+    stft_execution_time = stft_end_time - stft_start_time
+
+    print(f"STFT Filter Specifications: Cutoff Frequency = {stft_cutoff_freq} Hz")
+
+    print(f"STFT Execution Time: {stft_execution_time:.4f} seconds")
+
+    print("STFT Result:")
+    play_audio(audio_stft, sampling_rate)
+    plot_time_domain(audio_stft, sampling_rate, title="STFT Time Domain")
+    plot_frequency_domain(audio_stft, sampling_rate, title="STFT Frequency Domain")
+
+    # Measure IIR filter execution time
+    iir_start_time = time.time()
+    new_cutoff_freq_iir = float(input("Enter the new cutoff frequency for IIR filter (in Hz): "))
+    order = 4
+    sos_iir = butter(N=order, Wn=new_cutoff_freq_iir/(0.5*sampling_rate), btype='low', analog=False, output='sos')
+    filtered_audio_iir = sosfiltfilt(sos_iir, audio_stft)
+    iir_end_time = time.time()
+    iir_execution_time = iir_end_time - iir_start_time
+    print(f"IIR Filter Specifications: Cutoff Frequency = {new_cutoff_freq_iir} Hz, Order = {order}")
+
+    print(f"IIR Filter Execution Time: {iir_execution_time:.4f} seconds")
+
+    print("IIR Filtered Audio:")
+    play_audio(filtered_audio_iir, sampling_rate)
+    plot_time_domain(filtered_audio_iir, sampling_rate, title="IIR Filtered Time Domain")
+    plot_frequency_domain(filtered_audio_iir, sampling_rate, title="IIR Filtered Frequency Domain")
+
+    attenuation_stft = calculate_attenuation(audio_data, audio_stft)
+    noise_reduction_stft = calculate_noise_reduction(original_attenuation, attenuation_stft)
+
+    attenuation_iir = calculate_attenuation(audio_data, filtered_audio_iir)
+    noise_reduction_iir = calculate_noise_reduction(original_attenuation, attenuation_iir)
+
+    # Performance Analysis Table
+    print("\nPerformance Analysis Table:")
+    print("Stage\t\tFiltering Technique\tExecution Time (s)\tAttenuation (dB)\tNoise Reduction(%)")
+    print("-" * 90)
+    print(f"Original\t\t-\t\t\t-\t\t\t{0:.4f}\t\t\t{original_attenuation:.2f}\t\t\t{original_noise_reduction:.2f}")
+    print(f"STFT Filtering\t\tSTFT\t\t\t{stft_execution_time:.4f}\t\t\t{attenuation_stft:.2f}\t\t\t{noise_reduction_stft:.2f}")
+    print(f"IIR Filtering\t\tIIR\t\t\t{iir_execution_time:.4f}\t\t\t{attenuation_iir:.2f}\t\t\t{noise_reduction_iir:.2f}")
+
+    # Performance Analysis Plot
+    stages = ["Original", "STFT Filtering", "IIR Filtering"]
+
+    # Plot Execution Time
+    plt.figure(figsize=(12, 4))
+    plt.bar(stages, [0, stft_execution_time, iir_execution_time], color='red')
+    plt.xlabel('Processing Stage')
+    plt.ylabel('Execution Time (s)')
+    plt.title('Execution Time Comparison')
+    plt.show()
+
+    # Plot Attenuation
+    plt.figure(figsize=(12, 4))
+    plt.bar(stages, [original_attenuation, attenuation_stft, attenuation_iir], color='blue')
+    plt.xlabel('Processing Stage')
+    plt.ylabel('Attenuation (dB)')
+    plt.title('Attenuation Comparison')
+    plt.show()
+
+    # Plot Noise Reduction
+    plt.figure(figsize=(12, 4))
+    plt.bar(stages, [original_noise_reduction, noise_reduction_stft, noise_reduction_iir], color='green')
+    plt.xlabel('Processing Stage')
+    plt.ylabel('Noise Reduction (%)')
+    plt.title('Noise Reduction Comparison')
+    plt.show()
+
+    # Model Summary Report
+    print("\nModel Summary Report:")
+    print("Original Audio Summary:")
+    print(librosa.get_duration(y=audio_data, sr=sampling_rate), "seconds duration")
+    print("STFT Filtered Audio Summary:")
+    print(librosa.get_duration(y=audio_stft, sr=sampling_rate), "seconds duration")
+    print("IIR Filtered Audio Summary:")
+    print(librosa.get_duration(y=filtered_audio_iir, sr=sampling_rate), "seconds duration")
+
+    # Compare noise reduction percentages
+    if noise_reduction_stft > noise_reduction_iir:
+        print(f"\nSTFT Filtering is better with {noise_reduction_stft:.2f}% noise reduction.")
+    elif noise_reduction_iir > noise_reduction_stft:
+        print(f"\nIIR Filtering is better with {noise_reduction_iir:.2f}% noise reduction.")
+    else:
+        print("\nBoth methods show similar noise reduction.")
+
+    end_time = time.time()
+    total_execution_time = end_time - start_time
+    print(f"\nTotal Execution Time: {total_execution_time:.4f} seconds")
+
+if __name__ == "__main__":
+    main()
